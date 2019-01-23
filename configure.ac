@@ -25,7 +25,7 @@
 # MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
 # NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
 # BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
-# ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 #
@@ -43,6 +43,13 @@ AC_SUBST(MINOR_VERSION)
 
 AC_ARG_VAR(CUDA_H_PATH, help-string)
 AC_ARG_VAR(RANLIB, ranlib tool)
+
+AC_ARG_WITH([rocm],
+	    AS_HELP_STRING([--with-rocm=DIR], [Specify HSA directory to enable ROCm support]),
+	    AS_IF([test "x$with_rocm" = "xyes"],
+		  AC_ERROR([Please specify ROCm path!]),
+		  [ROCM_PATH="$with_rocm"])
+	    )
 
 AC_ARG_ENABLE([verbs_exp],
 [AS_HELP_STRING([--disable-verbs_exp],
@@ -253,12 +260,6 @@ if [test $HAVE_EXP_ODP = yes] && [test $HAVE_VERBS_EXP = yes]; then
 	fi
 fi
 
-if [test "$CUDA_H_PATH" ]; then
-	AC_DEFINE([HAVE_CUDA], [1], [Enable CUDA feature])
-	AC_DEFINE_UNQUOTED([CUDA_PATH], "$CUDA_H_PATH" , [Enable CUDA feature])
-	LIBS=$LIBS" -lcuda"
-fi
-
 AC_TRY_LINK([
 #include <infiniband/verbs.h>
 #include <infiniband/verbs_exp.h>],
@@ -310,6 +311,32 @@ AC_TRY_LINK([#include <infiniband/verbs_exp.h>],
 AM_CONDITIONAL([HAVE_EXP_OOO_ATTR], [test "x$HAVE_EXP_OOO_ATTR" = "xyes"])
 if [test $HAVE_EXP_OOO_ATTR = yes]; then
 	AC_DEFINE([HAVE_EXP_OOO_ATTR], [1], [Have Experimental Out of order data placement support])
+fi
+
+if [test "$CUDA_H_PATH" ]; then
+	AC_DEFINE([HAVE_CUDA], [1], [Enable CUDA feature])
+	AC_DEFINE_UNQUOTED([CUDA_PATH], "$CUDA_H_PATH" , [Enable CUDA feature])
+	LIBS=$LIBS" -lcuda"
+fi
+
+if [test "$ROCM_PATH" ]; then
+	AC_MSG_NOTICE([Enable ROCm support ...])
+
+	AC_CHECK_SIZEOF([void*])
+	if test "x$ac_cv_sizeof_voidp" = "x"; then
+		AC_ERROR([Unable to determine size of void*!])
+	fi
+	if test "x$ac_cv_sizeof_voidp" = "4"; then
+		AC_ERROR([HSA incompatible: 32-bit platform?!?])
+	fi
+
+	AC_DEFINE([HAVE_ROCM], [1], [Enable ROCm platform support])
+	AC_DEFINE_UNQUOTED([HSA_H], "$ROCM_PATH/include/hsa/hsa.h", [Enable HSA])
+	AC_DEFINE_UNQUOTED([HSA_EXT_AMD_H], "$ROCM_PATH/include/hsa/hsa_ext_amd.h", [Enable HSA AMD extension])
+
+	LDFLAGS=$LDFLAGS" -L$ROCM_PATH/lib -Wl,-rpath=$ROCM_PATH/lib"
+	AC_SEARCH_LIBS([hsa_init], [hsa-runtime64], [],
+		       [AC_MSG_ERROR([Unable to find libhsa-runtime64 library!])])
 fi
 
 CFLAGS="-g -Wall -D_GNU_SOURCE -O3 $CFLAGS"

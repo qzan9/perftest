@@ -469,6 +469,11 @@ static void usage(const char *argv0, VerbType verb, TestType tst, int connection
 		printf(" Use CUDA lib for GPU-Direct testing.\n");
 		#endif
 
+		#ifdef HAVE_ROCM
+		printf("      --use_rocm=<agent> ");
+		printf(" Pick HSA agent and allocate gloabl pool for PeerDirect testing.\n");
+		#endif
+
 		#ifdef HAVE_VERBS_EXP
 		printf("      --use_exp ");
 		printf(" Use Experimental verbs in data path. Default is OFF.\n");
@@ -679,6 +684,8 @@ static void init_perftest_params(struct perftest_parameters *user_param)
 	user_param->is_rate_limit_type  = 0;
 	user_param->output		= -1;
 	user_param->use_cuda		= 0;
+	user_param->use_rocm		= 0;
+	user_param->hsa_agent_index	= 0;
 	user_param->mmap_file		= NULL;
 	user_param->mmap_offset		= 0;
 	user_param->iters_per_port[0]	= 0;
@@ -1342,6 +1349,34 @@ static void force_dependecies(struct perftest_parameters *user_param)
 		fprintf(stderr,"You cannot use CUDA and an mmap'd file at the same time\n");
 		exit(1);
 	}
+
+	if (user_param->use_cuda && user_param->use_rocm) {
+		printf(RESULT_LINE);
+		fprintf(stderr,"You cannot use CUDA and ROCm at the same time\n");
+		exit(1);
+	}
+	#endif
+
+	#ifdef HAVE_ROCM
+	if (user_param->use_rocm) {
+		if (user_param->tst != BW) {
+			printf(RESULT_LINE);
+			fprintf(stderr," Perftest supports ROCm only in BW tests\n");
+			exit(1);
+		}
+
+		if (user_param->mmap_file != NULL) {
+			printf(RESULT_LINE);
+			fprintf(stderr," You cannot use ROCm and an mmap'd file at the same time\n");
+			exit(1);
+		}
+
+		if (user_param->use_cuda) {
+			printf(RESULT_LINE);
+			fprintf(stderr," You cannot use ROCm and CUDA at the same time\n");
+			exit(1);
+		}
+	}
 	#endif
 
 	if ( (user_param->connection_type == UD) && (user_param->inline_size > MAX_INLINE_UD) ) {
@@ -1773,6 +1808,7 @@ int parser(struct perftest_parameters *user_param,char *argv[], int argc)
 	static int dont_xchg_versions_flag = 0;
 	static int use_exp_flag = 0;
 	static int use_cuda_flag = 0;
+	static int use_rocm_flag = 0;
 	static int mmap_file_flag = 0;
 	static int mmap_offset_flag = 0;
 	static int ipv6_flag = 0;
@@ -1895,6 +1931,9 @@ int parser(struct perftest_parameters *user_param,char *argv[], int argc)
 			{ .name = "retry_count",	.has_arg = 1, .flag = &retry_count_flag, .val = 1},
 			{ .name = "dont_xchg_versions",	.has_arg = 0, .flag = &dont_xchg_versions_flag, .val = 1},
 			{ .name = "use_cuda",		.has_arg = 0, .flag = &use_cuda_flag, .val = 1},
+			#ifdef HAVE_ROCM
+			{ .name = "use_rocm",		.has_arg = 1, .flag = &use_rocm_flag, .val = 1},
+			#endif
 			{ .name = "mmap",		.has_arg = 1, .flag = &mmap_file_flag, .val = 1},
 			{ .name = "mmap-offset",	.has_arg = 1, .flag = &mmap_offset_flag, .val = 1},
 			{ .name = "ipv6",		.has_arg = 0, .flag = &ipv6_flag, .val = 1},
@@ -2381,6 +2420,11 @@ int parser(struct perftest_parameters *user_param,char *argv[], int argc)
 					}
 					vlan_pcp_flag = 0;
 				}
+				#ifdef HAVE_ROCM
+				if (use_rocm_flag) {
+					user_param->hsa_agent_index = strtoul(optarg, NULL, 0);
+				}
+				#endif
 				break;
 
 			default:
@@ -2424,6 +2468,11 @@ int parser(struct perftest_parameters *user_param,char *argv[], int argc)
 	if (use_cuda_flag) {
 		user_param->use_cuda = 1;
 	}
+
+	if (use_rocm_flag) {
+		user_param->use_rocm = 1;
+	}
+
 	if (report_both_flag) {
 		user_param->report_both = 1;
 	}

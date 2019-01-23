@@ -139,6 +139,160 @@ static int pp_free_gpu(struct pingpong_context *ctx)
 }
 #endif
 
+#ifdef HAVE_ROCM
+
+static hsa_agent_t hsa_agent;
+static hsa_amd_memory_pool_t hsa_mpool;
+static unsigned long hsa_iter;
+
+static hsa_status_t find_hsa_agent(hsa_agent_t agent, void *data)
+{
+	hsa_device_type_t device_type;
+	hsa_status_t status;
+
+	char agent_name[64];
+	uint32_t bdfid;
+
+	if (hsa_iter == *((int *)data)) {
+		status = hsa_agent_get_info(agent, HSA_AGENT_INFO_NAME, agent_name);
+		if (status != HSA_STATUS_SUCCESS) {
+			fprintf(stderr, "Failed to get agent name: 0x%x\n", status);
+			return status;
+		}
+
+		status = hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &device_type);
+		if (status != HSA_STATUS_SUCCESS) {
+			fprintf(stderr, "Failed to get agent type: 0x%x\n", status);
+			return status;
+		}
+
+		if (HSA_DEVICE_TYPE_GPU == device_type) {
+			status = hsa_agent_get_info(agent, HSA_AMD_AGENT_INFO_BDFID, &bdfid);
+			if (status != HSA_STATUS_SUCCESS) {
+				fprintf(stderr, "Failed to get PCI info: 0x%x\n", status);
+				return status;
+			}
+
+			printf("Using GPU agent: %s (%02x:%02x.%02x)\n", agent_name,
+			                                                (bdfid >> 8) & 0xff,
+			                                                (bdfid >> 3) & 0x1f,
+			                                                 bdfid       & 0x07);
+
+		} else if (HSA_DEVICE_TYPE_CPU == device_type) {
+			printf("Using CPU agent: %s\n", agent_name);
+		}
+
+		hsa_agent = agent;
+		return HSA_STATUS_INFO_BREAK;
+	}
+
+	hsa_iter++;
+	return HSA_STATUS_SUCCESS;
+}
+
+static hsa_status_t find_hsa_agent_mpool(hsa_amd_memory_pool_t memory_pool, void *data)
+{
+	hsa_amd_segment_t amd_segment;
+	hsa_status_t status;
+
+	size_t pool_size;
+
+	status = hsa_amd_memory_pool_get_info(memory_pool, HSA_AMD_MEMORY_POOL_INFO_SEGMENT, &amd_segment);
+	if (status != HSA_STATUS_SUCCESS) {
+		fprintf(stderr, "Failed to get pool info: 0x%x\n", status);
+		return status;
+	}
+
+	if (HSA_AMD_SEGMENT_GLOBAL == amd_segment) {
+		status = hsa_amd_memory_pool_get_info(memory_pool, HSA_AMD_MEMORY_POOL_INFO_SIZE, &pool_size);
+		if (status != HSA_STATUS_SUCCESS) {
+			fprintf(stderr, "Failed to query pool size: 0x%x\n", status);
+			return status;
+		}
+
+		printf("Using global memory pool (%ld MiB)\n", pool_size / (1024L * 1024L));
+
+		hsa_mpool = memory_pool;
+		return HSA_STATUS_INFO_BREAK;
+	}
+
+	return HSA_STATUS_SUCCESS;
+}
+
+static int pp_hsa_init(struct pingpong_context *ctx, size_t _size, int hsa_agent_index)
+{
+	hsa_status_t status;
+	void *gpu_ptr;
+
+	printf("Initializing HSA ...\n");
+
+	status = hsa_init();
+	if (status != HSA_STATUS_SUCCESS) {
+		fprintf(stderr, "Failed to initialize ROCm runtime: 0x%x\n", status);
+		return 1;
+	}
+
+	// find agent
+	hsa_iter = 0;
+	hsa_agent.handle = (uint64_t)-1;
+	status = hsa_iterate_agents(find_hsa_agent, &hsa_agent_index);
+	if (status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK) {
+		fprintf(stderr, "Failed to iterate HSA agents: 0x%x\n", status);
+		return 1;
+	}
+	if ((uint64_t)-1 == hsa_agent.handle) {
+		fprintf(stderr, "Failed to find HSA agent with given index\n");
+		return 1;
+	}
+
+	// find memory pool; assuming one global pool per agent
+	hsa_mpool.handle = (uint64_t)-1;
+	status = hsa_amd_agent_iterate_memory_pools(hsa_agent, find_hsa_agent_mpool, NULL);
+	if (status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK) {
+		fprintf(stderr, "Failed to iterate HSA regions: 0x%x\n", status);
+		return 1;
+	}
+	if ((uint64_t)-1 == hsa_mpool.handle) {
+		fprintf(stderr, "Failed to find HSA memory pool with given index\n");
+		return 1;
+	}
+
+	// allocate HSA buffer; could be host memory
+	status = hsa_amd_memory_pool_allocate(hsa_mpool, _size, 0, &gpu_ptr);
+	if (status != HSA_STATUS_SUCCESS) {
+		fprintf(stderr, "Failed to allocate HSA memory: 0x%x\n", status);
+		return 1;
+	}
+
+	printf("Allocated HSA buffer at %p (%lu bytes)\n", gpu_ptr, (unsigned long) _size);
+	ctx->buf[0] = gpu_ptr;
+
+	return 0;
+}
+
+static int pp_hsa_shutdown(struct pingpong_context *ctx)
+{
+	hsa_status_t status;
+
+	status = hsa_amd_memory_pool_free(ctx->buf[0]);
+	ctx->buf[0] = NULL;
+	if (status != HSA_STATUS_SUCCESS) {
+		fprintf(stderr, "Failed to free HSA memory: 0x%x\n", status);
+		return 1;
+	}
+
+	printf("Shutdown HSA ...\n");
+	status = hsa_shut_down();
+	if (status != HSA_STATUS_SUCCESS) {
+		fprintf(stderr, "Failed to finalize HSA runtime: 0x%x\n", status);
+		return 1;
+	}
+
+	return 0;
+}
+
+#endif
+
 static int pp_init_mmap(struct pingpong_context *ctx, size_t size,
 			const char *fname, unsigned long offset)
 {
@@ -892,6 +1046,12 @@ int destroy_ctx(struct pingpong_context *ctx,
 	}
 	else
 	#endif
+	#ifdef HAVE_ROCM
+	if (user_param->use_rocm) {
+		pp_hsa_shutdown(ctx);
+	}
+	else
+	#endif
 	if (user_param->mmap_file != NULL) {
 		pp_free_mmap(ctx);
 	} else if (ctx->is_contig_supported == FAILURE) {
@@ -1199,6 +1359,16 @@ int create_single_mr(struct pingpong_context *ctx, struct perftest_parameters *u
 		ctx->is_contig_supported = FAILURE;
 		if(pp_init_gpu(ctx, ctx->buff_size)) {
 			fprintf(stderr, "Couldn't allocate work buf.\n");
+			return FAILURE;
+		}
+	} else
+	#endif
+
+	#ifdef HAVE_ROCM
+	if (user_param->use_rocm) {
+		ctx->is_contig_supported = FAILURE;
+		if(pp_hsa_init(ctx, ctx->buff_size, user_param->hsa_agent_index)) {
+			fprintf(stderr, "Couldn't allocate HSA buf.\n");
 			return FAILURE;
 		}
 	} else
