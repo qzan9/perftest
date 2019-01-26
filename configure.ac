@@ -25,7 +25,7 @@
 # MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
 # NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
 # BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
-
+# ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 #
@@ -46,9 +46,10 @@ AC_ARG_VAR(RANLIB, ranlib tool)
 
 AC_ARG_WITH([rocm],
 	    AS_HELP_STRING([--with-rocm=DIR], [Specify HSA directory to enable ROCm support]),
-	    AS_IF([test "x$with_rocm" = "xyes"],
-		  AC_ERROR([Please specify ROCm path!]),
-		  [ROCM_PATH="$with_rocm"])
+	    AS_CASE([$with_rocm],
+		    [yes], AC_ERROR([Please provide path to ROCm installation!]),
+		    [no], [],
+		    [ROCM_PATH="$with_rocm"])
 	    )
 
 AC_ARG_ENABLE([verbs_exp],
