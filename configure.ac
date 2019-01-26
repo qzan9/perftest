@@ -49,7 +49,7 @@ AC_ARG_WITH([rocm],
 	    AS_CASE([$with_rocm],
 		    [yes], AC_ERROR([Please provide path to ROCm installation!]),
 		    [no], [],
-		    [ROCM_PATH="$with_rocm"])
+		    [_ROCM_PATH="$with_rocm"])
 	    )
 
 AC_ARG_ENABLE([verbs_exp],
@@ -320,9 +320,7 @@ if [test "$CUDA_H_PATH" ]; then
 	LIBS=$LIBS" -lcuda"
 fi
 
-if [test "$ROCM_PATH" ]; then
-	AC_MSG_NOTICE([Enable ROCm support ...])
-
+if [test "$_ROCM_PATH" ]; then
 	AC_CHECK_SIZEOF([void*])
 	if test "x$ac_cv_sizeof_voidp" = "x"; then
 		AC_ERROR([Unable to determine size of void*!])
@@ -331,11 +329,11 @@ if [test "$ROCM_PATH" ]; then
 		AC_ERROR([HSA incompatible: 32-bit platform?!?])
 	fi
 
-	AC_DEFINE([HAVE_ROCM], [1], [Enable ROCm platform support])
-	AC_DEFINE_UNQUOTED([HSA_H], "$ROCM_PATH/include/hsa/hsa.h", [Enable HSA])
-	AC_DEFINE_UNQUOTED([HSA_EXT_AMD_H], "$ROCM_PATH/include/hsa/hsa_ext_amd.h", [Enable HSA AMD extension])
+	AC_DEFINE([HAVE_ROCM], [1], [Enable ROCm support])
 
-	LDFLAGS=$LDFLAGS" -L$ROCM_PATH/lib -Wl,-rpath=$ROCM_PATH/lib"
+	CFLAGS="-I$_ROCM_PATH/include $CFLAGS"
+	LDFLAGS="-L$_ROCM_PATH/lib -Wl,-rpath=$_ROCM_PATH/lib $LDFLAGS"
+
 	AC_SEARCH_LIBS([hsa_init], [hsa-runtime64], [],
 		       [AC_MSG_ERROR([Unable to find libhsa-runtime64 library!])])
 fi

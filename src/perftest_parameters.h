@@ -73,8 +73,8 @@
 #endif
 
 #ifdef HAVE_ROCM
-#include HSA_H
-#include HSA_EXT_AMD_H
+#include <hsa/hsa.h>
+#include <hsa/hsa_ext_amd.h>
 #endif
 
 /* Connection types available. */
