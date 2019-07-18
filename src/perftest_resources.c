@@ -2410,8 +2410,8 @@ struct ibv_qp* ctx_qp_create(struct pingpong_context *ctx,
 		#endif
 	}
 
-	if (errno == ENOMEM) {
-		fprintf(stderr, "Requested SQ size might be too big. Try reducing TX depth and/or inline size.\n");
+	if (qp == NULL && errno == ENOMEM) {
+		fprintf(stderr, "Requested QP size might be too big. Try reducing TX depth and/or inline size.\n");
 		fprintf(stderr, "Current TX depth is %d and  inline size is %d .\n", user_param->tx_depth, user_param->inline_size);
 	}
 
@@ -3928,6 +3928,12 @@ int run_iter_bw(struct pingpong_context *ctx,struct perftest_parameters *user_pa
 						err = (ctx->post_send_func_pointer)(ctx->qp[index],
 							&ctx->wr[index*user_param->post_list],&bad_wr);
 					}
+					if (err) {
+						fprintf(stderr,"Couldn't post send: qp %d scnt=%lu \n",index,ctx->scnt[index]);
+						return_value = FAILURE;
+						goto cleaning;
+					}
+
 				#ifdef HAVE_ACCL_VERBS
 				}
 				#endif
