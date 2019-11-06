@@ -57,7 +57,6 @@ static int set_mcast_group(struct pingpong_context *ctx,
 		struct perftest_parameters *user_param,
 		struct mcast_parameters *mcg_params)
 {
-	int i;
 	struct ibv_port_attr port_attr;
 
 	if (ibv_query_gid(ctx->context,user_param->ib_port,user_param->gid_index,&mcg_params->port_gid)) {
@@ -74,26 +73,15 @@ static int set_mcast_group(struct pingpong_context *ctx,
 	mcg_params->sm_lid  = port_attr.sm_lid;
 	mcg_params->sm_sl   = port_attr.sm_sl;
 	mcg_params->ib_port = user_param->ib_port;
-	mcg_params->user_mgid = user_param->user_mgid;
-	set_multicast_gid(mcg_params,ctx->qp[0]->qp_num,(int)user_param->machine);
+	mcg_params->ib_ctx  = ctx->context;
 
 	if (!strcmp(link_layer_str(user_param->link_type),"IB")) {
 		/* Request for Mcast group create registery in SM. */
 		if (join_multicast_group(SUBN_ADM_METHOD_SET,mcg_params)) {
-			fprintf(stderr," Failed to Join Mcast request\n");
+			fprintf(stderr,"Couldn't Register the Mcast group on the SM\n");
 			return FAILURE;
 		}
 	}
-
-	for (i=0; i < user_param->num_of_qps; i++) {
-
-		if (ibv_attach_mcast(ctx->qp[i],&mcg_params->mgid,mcg_params->mlid)) {
-			fprintf(stderr, "Couldn't attach QP to MultiCast group");
-			return FAILURE;
-		}
-	}
-	mcg_params->mcast_state |= MCAST_IS_ATTACHED;
-
 	return 0;
 }
 
@@ -113,9 +101,9 @@ static int send_set_up_connection(struct pingpong_context *ctx,
 		return FAILURE;
 	}
 
-	if (user_param->use_mcg && (user_param->duplex || user_param->machine == SERVER)) {
-
+	if (user_param->use_mcg) {
 		mcg_params->user_mgid = user_param->user_mgid;
+
 		set_multicast_gid(mcg_params,ctx->qp[0]->qp_num,(int)user_param->machine);
 		if (set_mcast_group(ctx,user_param,mcg_params)) {
 			return FAILURE;
@@ -133,7 +121,6 @@ static int send_set_up_connection(struct pingpong_context *ctx,
 		my_dest->lid = mcg_params->mlid;
 		my_dest->qpn = QPNUM_MCAST;
 	}
-
 	return 0;
 }
 
@@ -146,19 +133,14 @@ static int send_destroy_ctx(struct pingpong_context *ctx,
 {
 	int i;
 	if (user_param->use_mcg) {
-
-		if (user_param->machine == SERVER)
-		{
-			for (i=0; i < user_param->num_of_qps; i++) {
+		for (i=0; i < user_param->num_of_qps; i++) {
 				if (ibv_detach_mcast(ctx->qp[i],&mcg_params->base_mgid,mcg_params->base_mlid)) {
 					fprintf(stderr, "Couldn't dettach QP to MultiCast group\n");
 					return FAILURE;
 				}
-			}
 		}
 
 		if (!strcmp(link_layer_str(user_param->link_type),"IB")) {
-
 			if (join_multicast_group(SUBN_ADM_METHOD_DELETE,mcg_params)) {
 				fprintf(stderr,"Couldn't Unregister the Mcast group on the SM\n");
 				return FAILURE;
@@ -222,14 +204,11 @@ int main(int argc, char *argv[])
 	}
 
 	/* Finding the IB device selected (or defalut if no selected). */
-	ib_dev = ctx_find_dev(user_param.ib_devname);
+	ib_dev = ctx_find_dev(&user_param.ib_devname);
 	if (!ib_dev) {
 		fprintf(stderr," Unable to find the Infiniband/RoCE device\n");
 		return FAILURE;
 	}
-
-	if (user_param.use_mcg)
-		GET_STRING(mcg_params.ib_devname,ibv_get_device_name(ib_dev));
 
 	/* Getting the relevant context from the device */
 	ctx.context = ibv_open_device(ib_dev);
@@ -336,7 +315,6 @@ int main(int argc, char *argv[])
 	}
 
 	if (user_param.use_mcg) {
-
 		memcpy(mcg_params.base_mgid.raw,mcg_params.mgid.raw,16);
 		memcpy(mcg_params.mgid.raw,rem_dest[0].gid.raw,16);
 		mcg_params.base_mlid = mcg_params.mlid;
@@ -397,9 +375,10 @@ int main(int argc, char *argv[])
 	ctx_set_send_wqes(&ctx,&user_param,rem_dest);
 
 	if (user_param.test_method == RUN_ALL) {
-
 		if (user_param.connection_type == UD)
-			size_max_pow =  (int)UD_MSG_2_EXP(MTU_SIZE(user_param.curr_mtu)) + 1;
+			size_max_pow = (int)MSG_SZ_2_EXP(MTU_SIZE(user_param.curr_mtu)) + 1;
+		else if (user_param.connection_type == SRD)
+			size_max_pow = (int)MSG_SZ_2_EXP(user_param.size) + 1;
 
 		for (i = 1; i < size_max_pow ; ++i) {
 

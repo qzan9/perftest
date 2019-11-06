@@ -37,7 +37,6 @@
 #if defined(__FreeBSD__)
 #include <sys/types.h>
 #include <netinet/in.h>
-#include <netinet/ip.h>
 #endif
 
 #include <stdio.h>
@@ -45,7 +44,7 @@
 #include <string.h>
 #include <signal.h>
 #include <getopt.h>
-#include </usr/include/netinet/ip.h>
+#include <netinet/ip.h>
 #include <poll.h>
 #include "perftest_parameters.h"
 #include "perftest_resources.h"
@@ -119,13 +118,12 @@ int main(int argc, char *argv[])
 	user_param.duplex  = 1;
 
 	/* Find the selected IB device (or default if the user didn't select one). */
-	ib_dev = ctx_find_dev(user_param.ib_devname);
+	ib_dev = ctx_find_dev(&user_param.ib_devname);
 	if (!ib_dev) {
 		fprintf(stderr," Unable to find the Infiniband/RoCE device\n");
 		DEBUG_LOG(TRACE,"<<<<<<%s",__FUNCTION__);
 		return FAILURE;
 	}
-	GET_STRING(user_param.ib_devname, ibv_get_device_name(ib_dev));
 
 	if (check_flow_steering_support(user_param.ib_devname)) {
 		return FAILURE;

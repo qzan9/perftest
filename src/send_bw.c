@@ -66,6 +66,7 @@ static int set_mcast_group(struct pingpong_context *ctx,
 	mcg_params->sm_lid  = port_attr.sm_lid;
 	mcg_params->sm_sl   = port_attr.sm_sl;
 	mcg_params->ib_port = user_param->ib_port;
+	mcg_params->ib_ctx  = ctx->context;
 
 	if (!strcmp(link_layer_str(user_param->link_type),"IB")) {
 		/* Request for Mcast group create registery in SM. */
@@ -191,14 +192,11 @@ int main(int argc, char *argv[])
 	}
 
 	/* Finding the IB device selected (or defalut if no selected). */
-	ib_dev = ctx_find_dev(user_param.ib_devname);
+	ib_dev = ctx_find_dev(&user_param.ib_devname);
 	if (!ib_dev) {
 		fprintf(stderr," Unable to find the Infiniband/RoCE device\n");
 		return FAILURE;
 	}
-
-	if (user_param.use_mcg)
-		GET_STRING(mcg_params.ib_devname,ibv_get_device_name(ib_dev));
 
 	/* Getting the relevant context from the device */
 	ctx.context = ibv_open_device(ib_dev);
@@ -378,9 +376,10 @@ int main(int argc, char *argv[])
 	}
 
 	if (user_param.test_method == RUN_ALL) {
-
 		if (user_param.connection_type == UD)
-			size_max_pow =  (int)UD_MSG_2_EXP(MTU_SIZE(user_param.curr_mtu)) + 1;
+			size_max_pow = (int)MSG_SZ_2_EXP(MTU_SIZE(user_param.curr_mtu)) + 1;
+		else if (user_param.connection_type == SRD)
+			size_max_pow = (int)MSG_SZ_2_EXP(user_param.size) + 1;
 
 		for (i = 1; i < size_max_pow ; ++i) {
 

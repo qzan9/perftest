@@ -15,7 +15,7 @@
 #define ETHERTYPE_LEN (6)
 #define MAC_ARR_LEN (6)
 #define HEX_BASE (16)
-static const char *connStr[] = {"RC","UC","UD","RawEth","XRC","DC"};
+static const char *connStr[] = {"RC","UC","UD","RawEth","XRC","DC","SRD"};
 static const char *testsStr[] = {"Send","RDMA_Write","RDMA_Read","Atomic"};
 static const char *portStates[] = {"Nop","Down","Init","Armed","","Active Defer"};
 static const char *qp_state[] = {"OFF","ON"};
@@ -196,8 +196,8 @@ static void usage(const char *argv0, VerbType verb, TestType tst, int connection
 
 	if (connection_type != RawEth) {
 		if (verb == SEND) {
-			printf("  -c, --connection=<RC/XRC/UC/UD/DC> ");
-			printf(" Connection type RC/XRC/UC/UD/DC (default RC)\n");
+			printf("  -c, --connection=<RC/XRC/UC/UD/DC/SRD> ");
+			printf(" Connection type RC/XRC/UC/UD/DC/SRD (default RC)\n");
 		} else 	if (verb == WRITE) {
 			printf("  -c, --connection=<RC/XRC/UC/DC> ");
 			printf(" Connection type RC/XRC/UC/DC (default RC)\n");
@@ -350,6 +350,9 @@ static void usage(const char *argv0, VerbType verb, TestType tst, int connection
 		printf("  -w, --limit_bw=<value> ");
 		printf(" Set verifier limit for bandwidth\n");
 	}
+
+	printf("  -W, --report-counters=<list of counter names> ");
+	printf(" Report performance counter change (example: \"counters/port_xmit_data,hw_counters/out_of_buffer\")\n");
 
 	if (connection_type != RawEth) {
 		printf("  -x, --gid-index=<index> ");
@@ -814,8 +817,19 @@ static void change_conn_type(int *cptr, VerbType verb, const char *optarg)
 		fprintf(stderr," DC not detected in libibverbs\n");
 		exit(1);
 		#endif
+	} else if (strcmp(connStr[6], optarg) == 0) {
+		#ifdef HAVE_SRD
+		if (verb != SEND) {
+			fprintf(stderr, " SRD connection only possible in SEND verb\n");
+			exit(1);
+		}
+		*cptr = SRD;
+		#else
+		fprintf(stderr, " SRD not detected in libibverbs\n");
+		exit(1);
+		#endif
 	} else {
-		fprintf(stderr," Invalid Connection type . please choose from {RC,UC,UD}\n");
+		fprintf(stderr, " Invalid Connection type. Please choose from {RC,UC,UD,XRC,DC,SRD}\n");
 		exit(1);
 	}
 }
@@ -1197,6 +1211,20 @@ static void force_dependecies(struct perftest_parameters *user_param)
 			fprintf(stderr," DC does not support RDMA_CM\n");
 			exit(1);
 		}
+	}
+
+	if (user_param->connection_type == SRD) {
+		if (user_param->work_rdma_cm == ON) {
+			printf(RESULT_LINE);
+			fprintf(stderr, " SRD does not support RDMA_CM\n");
+			exit(1);
+		}
+		if (user_param->use_event == ON) {
+			printf(RESULT_LINE);
+			fprintf(stderr, " SRD does not support events\n");
+			exit(1);
+		}
+		user_param->cq_mod = 1;
 	}
 
 	#ifndef HAVE_RSS_EXP
@@ -1604,6 +1632,7 @@ enum ctx_device ib_dev_name(struct ibv_context *context)
 			case 55296 : dev_fname = NETXTREME; break;
 			case 55298 : dev_fname = NETXTREME; break;
 			case 55300 : dev_fname = NETXTREME; break;
+			case 61344 : dev_fname = EFA; break;
 			default	   : dev_fname = UNKNOWN;
 		}
 	}
@@ -1771,6 +1800,8 @@ static void ctx_set_max_inline(struct ibv_context *context,struct perftest_param
 			}
 			if (current_dev == NETXTREME)
 				user_param->inline_size = 96;
+			else if (current_dev == EFA)
+				user_param->inline_size = 32;
 
 		} else {
 			user_param->inline_size = 0;
@@ -1938,6 +1969,7 @@ int parser(struct perftest_parameters *user_param,char *argv[], int argc)
 			{ .name = "client",		.has_arg = 0, .val = 'P' },
 			{ .name = "mac_fwd",		.has_arg = 0, .val = 'v' },
 			{ .name = "use_rss",		.has_arg = 0, .val = 'G' },
+			{ .name = "report-counters",	.has_arg = 1, .val = 'W' },
 			{ .name = "force-link",		.has_arg = 1, .flag = &force_link_flag, .val = 1},
 			{ .name = "remote_mac",		.has_arg = 1, .flag = &remote_mac_flag, .val = 1 },
 			{ .name = "local_mac",		.has_arg = 1, .flag = &local_mac_flag, .val = 1 },
@@ -2008,7 +2040,7 @@ int parser(struct perftest_parameters *user_param,char *argv[], int argc)
 			#endif
 			{ 0 }
 		};
-		c = getopt_long(argc,argv,"w:y:p:d:i:m:s:n:t:u:S:x:c:q:I:o:M:r:Q:A:l:D:f:B:T:L:E:J:j:K:k:X:aFegzRvhbNVCHUOZP",long_options,NULL);
+		c = getopt_long(argc,argv,"w:y:p:d:i:m:s:n:t:u:S:x:c:q:I:o:M:r:Q:A:l:D:f:B:T:L:E:J:j:K:k:X:W:aFegzRvhbNVCHUOZP",long_options,NULL);
 
 		if (c == -1)
 			break;
@@ -2229,6 +2261,12 @@ int parser(struct perftest_parameters *user_param,char *argv[], int argc)
 				  user_param->limit_msgrate = strtof(optarg,NULL);
 				  if (user_param->limit_msgrate < 0) {
 					  fprintf(stderr, " Invalid Minimum msgRate Limit\n");
+					  return FAILURE;
+				  }
+				  break;
+			case 'W':
+				  if (counters_alloc(optarg, &user_param->counter_ctx)) {
+					  fprintf(stderr, "Failed to parse the performance counter list\n");
 					  return FAILURE;
 				  }
 				  break;
@@ -2720,8 +2758,6 @@ int check_link_and_mtu(struct ibv_context *context,struct perftest_parameters *u
 			user_param->size = RAWETH_MIN_MSG_SIZE;
 		}
 	}
-	if (!user_param->ib_devname)
-		GET_STRING(user_param->ib_devname,ibv_get_device_name(context->device))
 
 	if (user_param->pkey_index > 0)
 		user_param->pkey_index = ctx_chk_pkey_index(context, user_param->pkey_index);
@@ -2768,10 +2804,6 @@ int check_link(struct ibv_context *context,struct perftest_parameters *user_para
 		user_param->out_reads = ctx_set_out_reads(context,user_param->out_reads);
 	else
 		user_param->out_reads = 1;
-
-
-	if (!user_param->ib_devname)
-		GET_STRING(user_param->ib_devname,ibv_get_device_name(context->device))
 
 	if (user_param->pkey_index > 0)
 		user_param->pkey_index = ctx_chk_pkey_index(context, user_param->pkey_index);
@@ -3051,6 +3083,9 @@ void print_full_bw_report (struct perftest_parameters *user_param, struct bw_rep
 		fflush(stdout);
 		fprintf(stdout, user_param->cpu_util_data.enable ? REPORT_EXT_CPU_UTIL : REPORT_EXT , calc_cpu_util(user_param));
 	}
+	if (user_param->counter_ctx) {
+		counters_print(user_param->counter_ctx);
+	}
 }
 /******************************************************************************
  *
@@ -3178,6 +3213,10 @@ void print_report_lat (struct perftest_parameters *user_param)
 		printf( user_param->cpu_util_data.enable ? REPORT_EXT_CPU_UTIL : REPORT_EXT , calc_cpu_util(user_param));
 	}
 
+	if (user_param->counter_ctx) {
+		counters_print(user_param->counter_ctx);
+	}
+
 	free(delta);
 }
 
@@ -3207,6 +3246,10 @@ void print_report_lat_duration (struct perftest_parameters *user_param)
 				user_param->iters,
 				latency, tps);
 		printf( user_param->cpu_util_data.enable ? REPORT_EXT_CPU_UTIL : REPORT_EXT , calc_cpu_util(user_param));
+	}
+
+	if (user_param->counter_ctx) {
+		counters_print(user_param->counter_ctx);
 	}
 }
 

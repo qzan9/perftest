@@ -121,7 +121,7 @@
 #define INC(size,cache_line_size) ((size > cache_line_size) ? ((size%cache_line_size == 0) ?  \
 	       (size) : (cache_line_size*(size/cache_line_size+1))) : (cache_line_size))
 
-#define UD_MSG_2_EXP(size) ((log(size))/(log(2)))
+#define MSG_SZ_2_EXP(size) ((log(size)) / (log(2)))
 
 #define MASK_IS_SET(mask, attr)      (((mask)&(attr))!=0)
 
@@ -249,7 +249,8 @@ int check_add_port(char **service,int port,
 /* ctx_find_dev
  *
  * Description : Returns the device corresponding to ib_devname
- *	or the first one found , in case ib_devname == NULL
+ *	or the first one found , in case ib_devname == NULL.
+ *	Also sets the actual device name selected.
  *
  * Parameters :
  *
@@ -257,7 +258,7 @@ int check_add_port(char **service,int port,
  *
  * Return Value : the device or NULL in case of failure.
  */
-struct ibv_device* ctx_find_dev(const char *ib_devname);
+struct ibv_device* ctx_find_dev(char **ib_devname);
 
 /* create_rdma_resources
  *

@@ -1217,6 +1217,12 @@ int create_comm_struct(struct perftest_comm *comm,
 		}
 	}
 
+	if ((user_param->counter_ctx) && (counters_open(user_param->counter_ctx,
+		user_param->ib_devname, user_param->ib_port))) {
+		fprintf(stderr," Unable to access performance counters\n");
+		return FAILURE;
+	}
+
 	return SUCCESS;
 }
 
@@ -1474,10 +1480,13 @@ int ctx_xchg_data( struct perftest_comm *comm,
 		void *my_data,
 		void *rem_data,int size)
 {
-	if (comm->rdma_params->use_rdma_cm || comm->rdma_params->work_rdma_cm)
-		ctx_xchg_data_rdma(comm,my_data,rem_data,size);
-	else
-		ctx_xchg_data_ethernet(comm,my_data,rem_data,size);
+	if (comm->rdma_params->use_rdma_cm || comm->rdma_params->work_rdma_cm) {
+		if (ctx_xchg_data_rdma(comm,my_data,rem_data,size))
+			return 1;
+	} else {
+		if (ctx_xchg_data_ethernet(comm,my_data,rem_data,size))
+			return 1;
+	}
 
 	return 0;
 }
@@ -1703,8 +1712,8 @@ void check_sys_data(struct perftest_comm *user_comm, struct perftest_parameters 
  ******************************************************************************/
 int check_mtu(struct ibv_context *context,struct perftest_parameters *user_param, struct perftest_comm *user_comm) {
 	int curr_mtu=0, rem_mtu=0;
-	char cur[2];
-	char rem[2];
+	char cur[sizeof(int)];
+	char rem[sizeof(int)];
 	int size_of_cur;
 	float rem_vers = atof(user_param->rem_version);
 
@@ -1744,9 +1753,8 @@ int check_mtu(struct ibv_context *context,struct perftest_parameters *user_param
 			fprintf(stderr," Changing to this MTU\n");
 		}
 		user_param->size = MTU_SIZE(user_param->curr_mtu);
-	}
-	/*checking msg size in raw ethernet*/
-	if (user_param->connection_type == RawEth){
+	} else if (user_param->connection_type == RawEth) {
+		/* checking msg size in raw ethernet */
 		if (user_param->size > user_param->curr_mtu) {
 			fprintf(stderr," Max msg size in RawEth is MTU %d\n",user_param->curr_mtu);
 			fprintf(stderr," Changing msg size to this MTU\n");
@@ -1754,6 +1762,21 @@ int check_mtu(struct ibv_context *context,struct perftest_parameters *user_param
 		} else if (user_param->size < RAWETH_MIN_MSG_SIZE) {
 			printf(" Min msg size for RawEth is 64B - changing msg size to 64 \n");
 			user_param->size = RAWETH_MIN_MSG_SIZE;
+		}
+	} else if (user_param->connection_type == SRD) {
+		struct ibv_port_attr port_attr;
+
+		if (ibv_query_port(context, user_param->ib_port, &port_attr)) {
+			fprintf(stderr, " Error when trying to query port\n");
+			exit(1);
+		}
+
+		if (user_param->size > port_attr.max_msg_sz) {
+			if (user_param->test_method == RUN_ALL) {
+				fprintf(stderr, " Max msg size is %u\n", port_attr.max_msg_sz);
+				fprintf(stderr, " Changing to this size\n");
+			}
+			user_param->size = port_attr.max_msg_sz;
 		}
 	}
 

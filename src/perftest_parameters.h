@@ -59,6 +59,7 @@
 #include <malloc.h>
 #endif
 #include "get_clock.h"
+#include "perftest_counters.h"
 
 #ifdef HAVE_CONFIG_H
 #include <config.h>
@@ -84,6 +85,7 @@
 #define RawEth  (3)
 #define XRC (4)
 #define DC  (5)
+#define SRD (6)
 
 /* Genral control definitions */
 #define OFF	     (0)
@@ -300,7 +302,8 @@ enum ctx_device {
 	BLUEFIELD		= 20,
 	BLUEFIELD2		= 21,
 	INTEL_ALL		= 22,
-	NETXTREME		= 23
+	NETXTREME		= 23,
+	EFA			= 24,
 };
 
 /* Units for rate limiter */
@@ -517,6 +520,7 @@ struct perftest_parameters {
 	int                             vlan_en;
 	uint32_t			vlan_pcp;
 	void 				(*print_eth_func)(void*);
+	struct counter_context		*counter_ctx;
 
 };
 
