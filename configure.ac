@@ -49,7 +49,15 @@ AC_ARG_WITH([rocm],
 	    AS_CASE([$with_rocm],
 		    [yes], AC_ERROR([Please provide path to ROCm installation!]),
 		    [no], [],
-		    [_ROCM_PATH="$with_rocm"])
+		    [_ROCM_PATH_="$with_rocm"])
+	    )
+
+AC_ARG_WITH([tune],
+	    AS_HELP_STRING([--with-tune=march], [Specify GCC x86 CPU type option]),
+	    AS_CASE([$with_rocm],
+		    [yes], AC_ERROR([Please tell the compiler of your CPU type!]),
+		    [no], [],
+		    [CPU_TYPE="$with_tune"])
 	    )
 
 AC_ARG_ENABLE([verbs_exp],
@@ -346,7 +354,7 @@ if [test "$CUDA_H_PATH" ]; then
 	LIBS=$LIBS" -lcuda"
 fi
 
-if [test "$_ROCM_PATH" ]; then
+if [test "$_ROCM_PATH_" ]; then
 	AC_CHECK_SIZEOF([void*])
 	if test "x$ac_cv_sizeof_voidp" = "x"; then
 		AC_ERROR([Unable to determine size of void*!])
@@ -357,11 +365,17 @@ if [test "$_ROCM_PATH" ]; then
 
 	AC_DEFINE([HAVE_ROCM], [1], [Enable ROCm support])
 
-	CFLAGS="-I$_ROCM_PATH/include $CFLAGS"
-	LDFLAGS="-L$_ROCM_PATH/lib -Wl,-rpath=$_ROCM_PATH/lib $LDFLAGS"
+	CFLAGS="-I$_ROCM_PATH_/include $CFLAGS"
+	LDFLAGS="-L$_ROCM_PATH_/lib -Wl,-rpath=$_ROCM_PATH_/lib $LDFLAGS"
 
 	AC_SEARCH_LIBS([hsa_init], [hsa-runtime64], [],
 		       [AC_MSG_ERROR([Unable to find libhsa-runtime64 library!])])
+fi
+
+if [test "$CPU_TYPE" ]; then
+	AX_CHECK_COMPILE_FLAG([-march=$CPU_TYPE -mtune=$CPU_TYPE],
+	                      [CFLAGS="-march=$CPU_TYPE -mtune=$CPU_TYPE $CFLAGS"],
+	                      [AC_MSG_ERROR([Unable to find libhsa-runtime64 library!])])
 fi
 
 CFLAGS="-g -Wall -D_GNU_SOURCE -O3 $CFLAGS"
