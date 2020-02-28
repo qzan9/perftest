@@ -55,6 +55,7 @@
 
 #include <infiniband/verbs.h>
 #include <unistd.h>
+#include <inttypes.h>
 #if !defined(__FreeBSD__)
 #include <malloc.h>
 #endif
@@ -134,6 +135,8 @@
 #define DEF_PAGE_SIZE (4096)
 #define DEF_FLOWS (1)
 #define RATE_VALUES_COUNT (18)
+#define DISABLED_CQ_MOD_VALUE    (1)
+#define MSG_SIZE_CQ_MOD_LIMIT (8192)
 
 /* Optimal Values for Inline */
 #define DEF_INLINE_WRITE (220)
@@ -148,7 +151,6 @@
 #define MIN_HOP_LIMIT	(0)
 #define MAX_HOP_LIMIT	(255)
 #define MIN_IB_PORT   (1)
-#define MAX_IB_PORT   (3)
 #define MIN_ITER      (5)
 #define MAX_ITER      (100000000)
 #define MIN_TX 	      (1)
@@ -210,11 +212,11 @@
 #define RESULT_FMT_FS_RATE_DUR " #flows		fs_avg_time[usec]    	fps[flow per sec]"
 
 /* Result print format */
-#define REPORT_FMT     " %-7lu    %-10lu       %-7.2lf            %-7.2lf		   %-7.6lf"
+#define REPORT_FMT " %-7lu    %-10" PRIu64 "       %-7.2lf            %-7.2lf		   %-7.6lf"
 
-#define REPORT_FMT_EXT     " %-7lu    %lu           %-7.6lf            %-7.6lf            %-7.6lf"
+#define REPORT_FMT_EXT " %-7lu    %" PRIu64 "           %-7.6lf            %-7.6lf            %-7.6lf"
 
-#define REPORT_FMT_PER_PORT     " %-7lu    %-10lu     %-7.2lf            %-7.2lf		   %-7.6lf        %-7.2lf            %-7.6lf              %-7.2lf            %-7.6lf"
+#define REPORT_FMT_PER_PORT     " %-7lu    %-10" PRIu64 "     %-7.2lf            %-7.2lf		   %-7.6lf        %-7.2lf            %-7.6lf              %-7.2lf            %-7.6lf"
 
 #define REPORT_EXT	"\n"
 
@@ -223,12 +225,12 @@
 #define REPORT_FMT_QOS " %-7lu    %d           %lu           %-7.2lf            %-7.2lf                  %-7.6lf\n"
 
 /* Result print format for latency tests. */
-#define REPORT_FMT_LAT " %-7lu %d          %-7.2f        %-7.2f      %-7.2f  	       %-7.2f     	%-7.2f		%-7.2f 		%-7.2f"
-#define REPORT_FMT_LAT_DUR " %-7lu       %d            %-7.2f        %-7.2f"
+#define REPORT_FMT_LAT " %-7lu %" PRIu64 "          %-7.2f        %-7.2f      %-7.2f  	       %-7.2f     	%-7.2f		%-7.2f 		%-7.2f"
+#define REPORT_FMT_LAT_DUR " %-7lu       %" PRIu64 "            %-7.2f        %-7.2f"
 
-#define REPORT_FMT_FS_RATE " %d          %-7.2f        		%-7.2f      	%-7.2f  	       		%-7.2f     	%-7.2f"
+#define REPORT_FMT_FS_RATE "%" PRIu64 "          %-7.2f        		%-7.2f      	%-7.2f  	       		%-7.2f     	%-7.2f"
 
-#define REPORT_FMT_FS_RATE_DUR " %d               %-7.2f		%-7.2f"
+#define REPORT_FMT_FS_RATE_DUR  "%" PRIu64 "               %-7.2f		%-7.2f"
 
 #define CHECK_VALUE(arg,type,minv,maxv,name) 						    					\
 { arg = (type)strtol(optarg, NULL, 0); if ((arg < minv) || (arg > maxv))                \
@@ -368,8 +370,9 @@ struct perftest_parameters {
 	int				mtu;
 	enum ibv_mtu			curr_mtu;
 	uint64_t			size;
+	int				req_size;
 	uint64_t			dct_key;
-	int				iters;
+	uint64_t				iters;
 	uint64_t			iters_per_port[2];
 	uint64_t			*port_by_qp;
 	int				tx_depth;
@@ -418,6 +421,7 @@ struct perftest_parameters {
 	int				duplex;
 	int				noPeak;
 	int				cq_mod;
+	int				req_cq_mod;
 	int 				spec;
 	int 				dualport;
 	int 				post_list;

@@ -652,6 +652,8 @@ static void init_perftest_params(struct perftest_parameters *user_param)
 	user_param->rx_depth		= user_param->verb == SEND ? DEF_RX_SEND : DEF_RX_RDMA;
 	user_param->duplex		= OFF;
 	user_param->noPeak		= OFF;
+	user_param->req_cq_mod		= 0;
+	user_param->req_size 		= 0;
 	user_param->cq_mod		= DEF_CQ_MOD;
 	user_param->iters		= (user_param->tst == BW && user_param->verb == WRITE) ? DEF_ITERS_WB : DEF_ITERS;
 	user_param->dualport		= OFF;
@@ -939,6 +941,22 @@ static void force_dependecies(struct perftest_parameters *user_param)
 		}
 	}
 
+	if (user_param->size > MSG_SIZE_CQ_MOD_LIMIT &&
+		user_param->connection_type != UD &&
+		user_param->test_method != RUN_ALL)
+	{
+		if (!user_param->req_cq_mod) // user didn't request any cq_mod
+		{
+			user_param->cq_mod = DISABLED_CQ_MOD_VALUE;
+		}
+		else if (user_param->cq_mod > DISABLED_CQ_MOD_VALUE)
+		{
+			printf(RESULT_LINE);
+			printf("Warning: Large message requested and CQ moderation enabled\n");
+			printf("Warning: It can lead to inaccurate results\n");
+		}
+	}
+
 	if (user_param->tst == LAT_BY_BW && user_param->rate_limit_type == DISABLE_RATE_LIMIT) {
 		if (user_param->output == FULL_VERBOSITY)
 			printf("rate_limit type is forced to SW.\n");
@@ -956,7 +974,9 @@ static void force_dependecies(struct perftest_parameters *user_param)
 		user_param->size = MAX_SIZE;
 
 	if (user_param->verb == ATOMIC && user_param->size != DEF_SIZE_ATOMIC) {
-		user_param->size = DEF_SIZE_ATOMIC;
+		printf(RESULT_LINE);
+		printf("Message size cannot be changed for Atomic tests \n");
+		exit (1);
 	}
 
 	if (user_param->use_srq && user_param->verb != SEND) {
@@ -982,9 +1002,20 @@ static void force_dependecies(struct perftest_parameters *user_param)
 	}
 
 	if (user_param->post_list > 1) {
-		user_param->cq_mod = user_param->post_list;
+		#ifdef HAVE_IBV_WR_API
 		printf(RESULT_LINE);
-		printf("Post List requested - CQ moderation will be the size of the post list\n");
+		fprintf(stderr, " Post list greater than 1 is not supported with new WR API\n");
+		exit(1);
+		#endif
+		if (!user_param->req_cq_mod) {
+			user_param->cq_mod = user_param->post_list;
+			printf(RESULT_LINE);
+			printf("Post List requested - CQ moderation will be the size of the post list\n");
+		} else if ((user_param->post_list % user_param->cq_mod) != 0) {
+			printf(RESULT_LINE);
+			fprintf(stderr, " Post list size must be a multiple of CQ moderation\n");
+			exit(1);
+		}
 	}
 
 	if (user_param->test_type==DURATION) {
@@ -2049,7 +2080,12 @@ int parser(struct perftest_parameters *user_param,char *argv[], int argc)
 
 			case 'p': user_param->port = strtol(optarg, NULL, 0); break;
 			case 'd': GET_STRING(user_param->ib_devname,strdupa(optarg)); break;
-			case 'i': CHECK_VALUE(user_param->ib_port,uint8_t,MIN_IB_PORT,MAX_IB_PORT,"IB Port"); break;
+			case 'i': user_param->ib_port = strtol(optarg, NULL, 0);
+				  if (user_param->ib_port < MIN_IB_PORT) {
+					  fprintf(stderr, "IB Port can't be less than %d\n", MIN_IB_PORT);
+					  return 1;
+				  }
+				  break;
 			case 'm': user_param->mtu  = strtol(optarg, NULL, 0); break;
 			case 'n': CHECK_VALUE(user_param->iters,int,MIN_ITER,MAX_ITER,"Iteration num"); break;
 			case 't': CHECK_VALUE(user_param->tx_depth,int,MIN_TX,MAX_TX,"Tx depth"); break;
@@ -2089,7 +2125,9 @@ int parser(struct perftest_parameters *user_param,char *argv[], int argc)
 					  fprintf(stderr," On RDMA verbs rx depth can be only 1\n");
 					  return 1;
 				  } break;
-			case 'Q': CHECK_VALUE(user_param->cq_mod,int,MIN_CQ_MOD,MAX_CQ_MOD,"CQ moderation"); break;
+			case 'Q': CHECK_VALUE(user_param->cq_mod,int,MIN_CQ_MOD,MAX_CQ_MOD,"CQ moderation");
+				  user_param->req_cq_mod = 1;
+				  break;
 			case 'A':
 				  if (user_param->verb != ATOMIC) {
 					  fprintf(stderr," You are not running the atomic_lat/bw test!\n");
@@ -2146,6 +2184,7 @@ int parser(struct perftest_parameters *user_param,char *argv[], int argc)
 					  size_factor = 1024*1024;
 				  }
 				  user_param->size = (uint64_t)strtol(optarg, NULL, 0) * size_factor;
+				  user_param->req_size = 1;
 				  if (user_param->size < 1 || user_param->size > (UINT_MAX / 2)) {
 					  fprintf(stderr," Message Size should be between %d and %d\n",1,UINT_MAX/2);
 					  return 1;
@@ -2965,14 +3004,20 @@ void print_report_bw (struct perftest_parameters *user_param, struct bw_report_d
 
 	if (user_param->noPeak == OFF) {
 		/* Find the peak bandwidth unless asked not to in command line */
-		for (i = 0; i < num_of_calculated_iters * num_of_qps; ++i) {
-			for (j = i; j < num_of_calculated_iters * num_of_qps; ++j) {
+		for (i = 0; i < num_of_calculated_iters * num_of_qps; i += user_param->post_list) {
+			for (j = ROUND_UP(i + 1, user_param->cq_mod) - 1; j < num_of_calculated_iters * num_of_qps;
+					j += user_param->cq_mod) {
 				t = (user_param->tcompleted[j] - user_param->tposted[i]) / (j - i + 1);
-				if (t < opt_delta) {
+				if (t < opt_delta)
 					opt_delta  = t;
-					opt_posted = i;
-					opt_completed = j;
-				}
+			}
+
+			/* Handle case where CQE was explicitly signaled on last iteration. */
+			if ((num_of_calculated_iters * num_of_qps) % user_param->cq_mod) {
+				j = num_of_calculated_iters * num_of_qps - 1;
+				t = (user_param->tcompleted[j] - user_param->tposted[i]) / (j - i + 1);
+				if (t < opt_delta)
+					opt_delta  = t;
 			}
 		}
 	}
