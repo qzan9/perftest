@@ -45,20 +45,20 @@ AC_ARG_VAR(CUDA_H_PATH, help-string)
 AC_ARG_VAR(RANLIB, ranlib tool)
 
 AC_ARG_WITH([rocm],
-	    AS_HELP_STRING([--with-rocm=DIR], [Specify HSA directory to enable ROCm support]),
-	    AS_CASE([$with_rocm],
-		    [yes], AC_ERROR([Please provide path to ROCm installation!]),
-		    [no], [],
-		    [_ROCM_PATH_="$with_rocm"])
-	    )
+            AS_HELP_STRING([--with-rocm=DIR], [Specify HSA directory to enable ROCm support]),
+            AS_CASE([$with_rocm],
+                    [yes], AC_ERROR([Please provide path to ROCm installation!]),
+                    [no], [],
+                    [_ROCM_PATH_="$with_rocm"])
+           )
 
 AC_ARG_WITH([tune],
-	    AS_HELP_STRING([--with-tune=march], [Specify GCC x86 CPU type option]),
-	    AS_CASE([$with_rocm],
-		    [yes], AC_ERROR([Please tell the compiler of your CPU type!]),
-		    [no], [],
-		    [CPU_TYPE="$with_tune"])
-	    )
+            AS_HELP_STRING([--with-tune=march], [Specify GCC x86 CPU type option]),
+            AS_CASE([$with_tune],
+                    [yes], AC_ERROR([Please tell the compiler of your CPU type!]),
+                    [no], [],
+                    [CPU_TYPE="$with_tune"])
+           )
 
 AC_ARG_ENABLE([verbs_exp],
 [AS_HELP_STRING([--disable-verbs_exp],
@@ -354,7 +354,7 @@ if [test "$CUDA_H_PATH" ]; then
 	LIBS=$LIBS" -lcuda"
 fi
 
-if [test "$_ROCM_PATH_" ]; then
+if [test "$_ROCM_PATH_"]; then
 	AC_CHECK_SIZEOF([void*])
 	if test "x$ac_cv_sizeof_voidp" = "x"; then
 		AC_ERROR([Unable to determine size of void*!])
@@ -369,13 +369,13 @@ if [test "$_ROCM_PATH_" ]; then
 	LDFLAGS="-L$_ROCM_PATH_/lib -Wl,-rpath=$_ROCM_PATH_/lib $LDFLAGS"
 
 	AC_SEARCH_LIBS([hsa_init], [hsa-runtime64], [],
-		       [AC_MSG_ERROR([Unable to find libhsa-runtime64 library!])])
+	               [AC_MSG_ERROR([Unable to find libhsa-runtime64 library!])])
 fi
 
-if [test "$CPU_TYPE" ]; then
+if [test "$CPU_TYPE"]; then
 	AX_CHECK_COMPILE_FLAG([-march=$CPU_TYPE -mtune=$CPU_TYPE],
 	                      [CFLAGS="-march=$CPU_TYPE -mtune=$CPU_TYPE $CFLAGS"],
-	                      [AC_MSG_ERROR([Unable to find libhsa-runtime64 library!])])
+	                      [AC_MSG_WARN([$CPU_TYPE tune not supported by compiler!])])
 fi
 
 CFLAGS="-g -Wall -D_GNU_SOURCE -O3 $CFLAGS"
